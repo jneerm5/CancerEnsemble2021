@@ -1,0 +1,210 @@
+---
+title: "Project 2"
+author: "Juli Neermann"
+date: "03/18/2021"
+output:
+  word_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = normalizePath("C:/Users/jewel/Documents/MSBA-UWT/WINTER 2021/TBANLT 560/Proj2/"))
+getwd()
+library(klaR)
+library(e1071)
+library(mlbench)
+library(nnet)
+library(MASS)
+library(rpart)
+library(randomForest)
+library(party)
+library(ipred)
+library(ROCR)
+library(caret)
+```
+
+#Bring in the data
+```{r}
+data(BreastCancer)
+mydata<-data.frame(BreastCancer)
+#Look at the top 5 rows of the data
+head(mydata)
+#We don't care about the ID, so we'll select columns 2 to 11.
+mydata <- cbind(mydata[2:11])
+
+#Remove records with missing data
+mydata <- na.omit(mydata)
+
+#Column 10, Class, will be our predicted variable throughout as we want to know whether or not there is malignancy.
+
+#Look at a summary of mydata
+#summary(mydata)
+
+#Check the structure of mydata
+#str(mydata)
+
+#Partition the data set for 80% training and 20% validation.
+set.seed(123)
+
+#Index the data to reference the training set versus the validation set.
+index <- sample(2, nrow(mydata), replace = TRUE, prob=c(0.8, 0.2))
+```
+
+
+#Support Vector Machines
+```{r}
+#Uses the e1071 library
+
+# create model using svm (support vector machine)
+
+# svm requires tuning
+x.svm.tune <- tune(svm, Class~., data = mydata[index == 1,],
+                   ranges = list(gamma = 2^(-8:1), cost = 2^(0:4)),
+                   tunecontrol = tune.control(sampling = "fix"))
+# display the tuning results (in text format)
+x.svm.tune
+# If the tuning results are on the margin of the parameters (e.g., gamma = 2^-8), then widen the parameters.
+# I manually copied the cost and gamma from console messages above to parameters below.
+x.svm <- svm(Class~., data = mydata[index == 1,], cost=4, gamma=0.0625, probability = TRUE)
+
+mySVM.pred <- predict(x.svm, mydata)
+confusionMatrix(as.factor(mySVM.pred), as.factor(mydata$Class))
+
+x.svm.prob <- predict(x.svm, type="prob", newdata=mydata[index == 2,], probability = TRUE)
+x.svm.prob.rocr <- prediction(attr(x.svm.prob, "probabilities")[,2], mydata[index == 2,'Class'])
+x.svm.perf <- performance(x.svm.prob.rocr, "tpr","fpr")
+plot.new()
+plot(x.svm.perf, col=6, add=TRUE)
+```
+
+#Naive Bayes
+```{r}
+#Uses the klaR library
+myNB <- NaiveBayes(Class ~ ., mydata[index == 1,])
+myNB.pred <- predict(myNB,mydata)
+confusionMatrix(as.factor(myNB.pred$class),as.factor(mydata$Class))
+```
+
+#Neural Net
+```{r}
+#Uses the nnet library
+myNN <- nnet(Class ~ ., mydata[index == 1,], size=1)
+myNN.pred <- predict(myNN,mydata,type="class")
+confusionMatrix(as.factor(myNN.pred),as.factor(mydata$Class))
+```
+
+#Decision trees
+```{r}
+#Uses the MASS and rpart libraries
+myTREE <- rpart(Class ~ ., mydata[index == 1,])
+
+# predict classes for the evaluation data set
+myTREE.pred <- predict(myTREE, type="class", newdata=mydata[index == 2,])
+# score the evaluation data set (extract the probabilities)
+myTREE.prob <- predict(myTREE, type="prob", newdata=mydata[index == 2,])
+table(myTREE.pred, mydata[index == 2,]$Class)
+
+plot(myTREE,main="Decision tree created using rpart"); text(myTREE)
+summary(myTREE)
+myTREE.pred <- predict(myTREE,mydata,type="class")
+confusionMatrix(as.factor(myTREE.pred),as.factor(mydata$Class))
+```
+
+#Regularised Discriminant Analysis
+```{r}
+#Uses the klaR library
+myRDA <- rda(Class ~ ., mydata[index == 1,])
+myRDA.pred <- predict(myRDA, mydata)
+table(myRDA.pred$class,mydata$Class)
+```
+
+#Random Forests
+```{r}
+#Uses the randomForest library
+myRF <- randomForest(Class ~ .,mydata[index == 1,])
+myRF.pred <- predict(myRF, mydata)
+table(myRF.pred, mydata$Class)
+```
+
+#Visual comparisons
+```{r}
+# create model using recursive partitioning on the training data set
+
+# create model using conditional inference trees
+x.ct <- ctree(Class ~ ., data=mydata[index == 1,])
+x.ct.pred <- predict(x.ct, newdata=mydata[index == 2,])
+x.ct.prob <-  1- unlist(treeresponse(x.ct, mydata[index == 2,]), use.names=F)[seq(1,nrow(mydata[index == 2,])*2,2)]
+table(x.ct.pred, mydata[index == 2,]$Class)
+
+# ctree
+x.ct.prob.rocr <- prediction(x.ct.prob, mydata[index == 2,'Class'])
+x.ct.perf <- performance(x.ct.prob.rocr, "tpr","fpr")
+# To view the decision tree
+plot(x.ct, main="Decision tree created using condition inference trees")
+
+# add=TRUE draws on the existing chart 
+plot.new()
+plot(x.ct.perf, col=3, add=TRUE)
+
+
+# create model using random forest and bagging ensemble using conditional inference trees
+x.cf <- cforest(Class ~ ., data=mydata[index == 1,], control = cforest_unbiased(mtry = ncol(mydata)-2))
+x.cf.pred <- predict(x.cf, newdata=mydata[index == 2,])
+x.cf.prob <-  1- unlist(treeresponse(x.cf, mydata[index == 2,]), use.names=F)[seq(1,nrow(mydata[index == 2,])*2,2)]
+table(x.cf.pred, mydata[index == 2,]$Class)
+
+# cforest
+x.cf.prob.rocr <- prediction(x.cf.prob, mydata[index == 2,'Class'])
+x.cf.perf <- performance(x.cf.prob.rocr, "tpr","fpr")
+plot.new()
+plot(x.cf.perf, col=4, add=TRUE)
+
+# create model using bagging (bootstrap aggregating)
+
+x.ip <- bagging(Class ~ ., data=mydata[index == 1,])
+x.ip.prob <- predict(x.ip, type="prob", newdata=mydata[index == 2,])
+x.ip.pred <- predict(x.ip, mydata)
+
+
+x.ip.prob.rocr <- prediction(x.ip.prob[,2], mydata[index == 2,'Class'])
+x.ip.perf <- performance(x.ip.prob.rocr, "tpr","fpr")
+plot.new()
+plot(x.ip.perf, col=5, add=TRUE)
+
+```
+
+
+```{r}
+#Uses the ROCR library
+## plot ROC curves to compare the performance of the individual classifiers
+# create an ROCR prediction object from rpart() probabilities
+myTREE.prob.rocr <- prediction(myTREE.prob[,2], mydata[index == 2,'Class'])
+# prepare an ROCR performance object for ROC curve (tpr=true positive rate, fpr=false positive rate)
+myTREE.perf <- performance(myTREE.prob.rocr, "tpr","fpr")
+
+#The following plot combines the ROCR curves under one plot and adds a legend.
+plot(myTREE.perf, col=2, main="ROC curves comparing classification performance of five machine learning models")
+plot(x.ct.perf, col=3, add=TRUE)
+plot(x.cf.perf, col=4, add=TRUE)
+plot(x.ip.perf, col=5, add=TRUE)
+plot(x.svm.perf, col=6, add=TRUE)
+legend(0.6, 0.6, c('rpart', 'ctree', 'cforest','bagging','svm'), 2:6)
+```
+
+#Ensemble
+```{r}
+#Combine the selected models into a new ensemble of predicted values. Here we select the decision tree, random forest, neural network, bagging, and SVM methods.
+
+Classifiers.df <- data.frame(myTREE.pred, myRF.pred, myNN.pred, x.ip.pred, mySVM.pred)
+#We convert the character classes to numeric classes (1 representing malignant cancer) to be able to use a majority rule ensemble of the selected models.
+Classifiers.df[,1]<-ifelse(Classifiers.df[,1]=="benign",0,1)
+Classifiers.df[,2]<-ifelse(Classifiers.df[,2]=="benign",0,1)
+Classifiers.df[,3]<-ifelse(Classifiers.df[,3]=="benign",0,1)
+Classifiers.df[,4]<-ifelse(Classifiers.df[,4]=="benign",0,1)
+Classifiers.df[,5]<-ifelse(Classifiers.df[,5]=="benign",0,1)
+#Add the column classifiers for each row and total it into a new column.
+Classifiers.df$RowSum<-rowSums(Classifiers.df)
+#Create a new column that switches the classifiers back to character classes based on the majority rule (when 3 of 5 models classify the data as malignant).
+Classifiers.df$RowClass<-ifelse(Classifiers.df$RowSum<3,"benign","malignant")
+#The resulting confusion matrix showing the accuracy of the ensemble of the 5 selected models.
+confusionMatrix(as.factor(Classifiers.df$RowClass),as.factor(mydata$Class))
+```
