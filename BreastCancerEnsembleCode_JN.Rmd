@@ -1,6 +1,5 @@
 ---
 title: "Project 2"
-author: "Juli Neermann"
 date: "03/18/2021"
 output:
   word_document: default
